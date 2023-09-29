@@ -5,7 +5,7 @@ import os
 import html
 import json
 import bcrypt
-
+import uuid
 import pymongo
 from pymongo import MongoClient
 
@@ -13,6 +13,8 @@ from pymongo import MongoClient
 mongo_client = MongoClient("mongo")
 db = mongo_client["cse312"]
 chat_collection = db["chat"]
+users_collection = db["users"]
+tokens_collection = db["tokens"]
 
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
@@ -99,7 +101,20 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             data = request.body.decode("utf-8")
             parsed_data = json.loads(data)
             message = html.escape(parsed_data["message"])
-            username = "Guest"
+            
+            auth_token = request.cookies.get("auth_token")
+            username = 'Guest'
+
+            if auth_token:
+                token_entry = None
+                for entry in tokens_collection.find():  # ユーザー名でフィルタリングせずにすべてのトークンを検索
+                    if bcrypt.checkpw(auth_token.encode('utf-8'), entry["hashed_token"]):
+                        token_entry = entry
+                        print(token_entry)
+                        break
+                if token_entry:
+                    username = token_entry["username"]  # 認証されたユーザー名を取得
+                    print(username)
             
             # メッセージをデータベースに保存
             chat_collection.insert_one({
@@ -125,6 +140,51 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 + b"Content-Type: application/json\r\n\r\n"
                 + chat_data.encode('utf-8')
             )
+
+        elif request.path == "/register" and request.method == 'POST':
+            data = request.body.decode("utf-8")
+            parsed_data = dict(item.split("=") for item in data.split("&"))
+
+            username = html.escape(parsed_data["username_reg"])
+            password = parsed_data["password_reg"]
+
+            salt = bcrypt.gensalt()
+            hashed_pw = bcrypt.hashpw(password.encode('utf-8'), salt)
+
+            users_collection.insert_one({
+                "username": username,
+                "hashed_pw": hashed_pw
+            })
+
+            response = b"HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\nRegister succeded"
+
+        elif request.path == '/login' and request.method == 'POST':
+            data = request.body.decode("utf-8")
+            parsed_data = dict(item.split("=") for item in data.split("&"))
+
+            username = html.escape(parsed_data["username_login"])
+            password = parsed_data["password_login"]
+
+            user = users_collection.find_one({"username": username})
+
+            if user and bcrypt.checkpw(password.encode('utf-8'), user["hashed_pw"]):
+                auth_token = str(uuid.uuid4())
+                hashed_token = bcrypt.hashpw(auth_token.encode('utf-8'), bcrypt.gensalt())
+
+                # トークンハッシュをデータベースに保存
+                tokens_collection.insert_one({
+                    "username": username,
+                    "hashed_token": hashed_token
+                })
+
+                response = (
+                    b"HTTP/1.1 303 See Other\r\n"
+                    + f"Set-Cookie: auth_token={auth_token}; HttpOnly; Max-Age=3600\r\nLocation: /\r\n\r\n".encode('utf-8'))
+                
+
+            else:
+                response = b"HTTP/1.1 401 Unauthorized\r\n\r\nInvalid credentials."
+
 
 
 
