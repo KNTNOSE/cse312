@@ -8,6 +8,7 @@ import bcrypt
 import uuid
 import pymongo
 from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 # Establish a connection to the MongoDB
 mongo_client = MongoClient("mongo")
@@ -124,9 +125,45 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
             response = b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\nMessage received"
 
+        elif request.path.startswith("/chat-message/") and request.method == "DELETE":
+            message_id_str = request.path.split("/")[-1]
+            message_id = ObjectId(message_id_str)
+            print(message_id)
+            
+            # Authenticate the user using the auth_token
+            auth_token = request.cookies.get("auth_token")
+            print(auth_token)
+
+            username = 'Guest'
+            if auth_token:
+                # Iterate through each token in the tokens_collection to find a match
+                for token_entry in tokens_collection.find():
+                    if bcrypt.checkpw(auth_token.encode('utf-8'), token_entry["hashed_token"]):
+                        username = token_entry["username"]
+                        print(username)
+                        break
+
+                    else:
+                        print('token_entry was not Found')
+            
+            message = chat_collection.find_one({"_id": message_id})
+            print(message)
+
+            if not message:
+                response = b"HTTP/1.1 404 Not Found\r\n\r\nMessage not found"
+            elif message["username"] != username:
+                response = b"HTTP/1.1 403 Forbidden\r\n\r\nCannot delete others' messages"
+            else:
+                # Setting the soft delete flag
+                chat_collection.update_one({"_id": message_id}, {"$set": {"deleted": True}})
+                response = b"HTTP/1.1 200 OK\r\n\r\nMessage marked as deleted"
+            
+
+
         elif request.path == "/chat-history" and request.method == "GET":
             
-            messages = chat_collection.find()
+            messages = chat_collection.find({"deleted": {"$ne": True}})
+
             chat_history = [{
                 "message": msg["message"],
                 "username": msg["username"],
@@ -184,6 +221,16 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
             else:
                 response = b"HTTP/1.1 401 Unauthorized\r\n\r\nInvalid credentials."
+
+        # elif request.path == '/delete' and request.method == 'POST':
+        #     data = request.body.decode("utf-8")
+        #     parsed_data = dict(item.split("=") for item in data.split("&"))
+
+        #     message_id = html.escape(parsed_data["messageId"])
+        #     auth_token = request.cookies.get("auth_token")
+        #     username = users_collection.find_one({
+                
+        #     })
 
 
 

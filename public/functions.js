@@ -1,8 +1,16 @@
 function deleteMessage(messageId) {
     const request = new XMLHttpRequest();
     request.onreadystatechange = function () {
+        console.log("Current readyState:", this.readyState);
+
         if (this.readyState === 4 && this.status === 200) {
-            console.log(this.response);
+            console.log(this.response);;
+            const messageElement = document.getElementById('message_' + messageId);
+            
+            if (messageElement) {
+                messageElement.remove();
+            }
+        
         }
     }
     request.open("DELETE", "/chat-message/" + messageId);
@@ -13,7 +21,8 @@ function chatMessageHTML(messageJSON) {
     const username = messageJSON.username;
     const message = messageJSON.message;
     const messageId = messageJSON.id;
-    let messageHTML = "<br><button onclick='deleteMessage(" + messageId + ")'>X</button> ";
+    // let messageHTML = "<br><button onclick='deleteMessage(" + messageId + ")'>X</button> ";
+    let messageHTML = '<br><button onclick="deleteMessage(\'' + messageId + '\')">X</button> ';
     messageHTML += "<span id='message_" + messageId + "'><b>" + username + "</b>: " + message + "</span>";
     return messageHTML;
 }
