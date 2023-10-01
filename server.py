@@ -37,7 +37,31 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             if os.path.exists(file_path) and os.path.isfile(file_path):
                 with open(file_path, "rb") as file:
                     content = file.read()
-                
+
+                auth_token = request.cookies.get("auth_token")
+        
+                if auth_token:  # ユーザーが認証済みの場合
+                    user_data = None
+                    for token_entry in tokens_collection.find():
+                        if bcrypt.checkpw(auth_token.encode('utf-8'), token_entry["hashed_token"]):
+                            user_data = token_entry
+                            break
+                    
+                    if user_data:
+                        xsrf_token = user_data.get("xsrf_token")
+                        if not xsrf_token:
+                            xsrf_token = secrets.token_hex(16)
+                            tokens_collection.update_one({"hashed_token": user_data["hashed_token"]}, {"$set": {"xsrf_token": xsrf_token}})
+                            print("xsrf_token was generated")
+                        else:
+                            print('xsrf_token exists')
+                        
+                        # プレースホルダーをXSRFトークンで置き換えます
+                        placeholder = "YOUR_XSRF_TOKEN_HERE"
+                        content_str = content.decode('utf-8')  # バイト列を文字列に変換
+                        content_str = content_str.replace(placeholder, xsrf_token)
+                        content = content_str.encode('utf-8')
+
                 content_length = len(content)
                 content_length_header = f"Content-Length: {content_length}\r\n"
                 response = (
@@ -46,6 +70,8 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                     + b"Content-Type: text/html\r\n\r\n"
                     + content
                 )
+
+
 
         elif request.path.startswith("/image/"):
             # リクエストが /image/ から始まる場合
@@ -112,38 +138,47 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             if not auth_token:
                 response = b"HTTP/1.1 400 Bad Request\r\n\r\nMissing auth token."
 
-            user_data = None
-            for token_entry in tokens_collection.find():
-                if bcrypt.checkpw(auth_token.encode('utf-8'), token_entry["hashed_token"]):
-                    user_data = token_entry
-                    break
-            
-            if user_data:
-                if not user_data.get("xsrf_token"):
-                    xsrf_token = secrets.token_hex(16)
-                    tokens_collection.update_one({"hashed_token": user_data["hashed_token"]}, {"$set": {"xsrf_token": xsrf_token}})
-                    print("xsrf_token was generated")
-                else:
-                    xsrf_token = user_data["xsrf_token"]
-                    print('xsrf_token exists')
-                
-                
-                username = user_data["username"]
-                
-                chat_collection.insert_one({
-                    "message": message,
-                    "username": username
-                })
-                
-                response = (
-                    b"HTTP/1.1 200 OK\r\n"
-                    + f"Content-Length: {len(xsrf_token)}\r\n".encode('utf-8')
-                    + b"Content-Type: text/plain\r\n\r\n"
-                    + xsrf_token.encode('utf-8')
-                )
             else:
-                print('chat-message error')
-                response = b"HTTP/1.1 401 Unauthorized\r\n\r\nInvalid or missing auth token."
+                provided_xsrf_token = parsed_data.get("xsrf_token")
+                print(provided_xsrf_token)
+
+                user_data = None
+                for token_entry in tokens_collection.find():
+                    if bcrypt.checkpw(auth_token.encode('utf-8'), token_entry["hashed_token"]):
+                        user_data = token_entry
+                        break
+                
+                if user_data:
+                    xsrf_token = user_data["xsrf_token"]
+
+                    # If there's no token or the token doesn't match the one for the user, respond with 403
+                    if not provided_xsrf_token or provided_xsrf_token != xsrf_token:
+                        response = b"HTTP/1.1 403 Forbidden\r\n\r\nInvalid XSRF token."
+                        self.request.sendall(response)
+                        return
+                        
+                    username = user_data["username"]
+                    
+                    chat_collection.insert_one({
+                        "message": message,
+                        "username": username
+                    })
+                    
+                    response = (
+                        b"HTTP/1.1 200 OK\r\n"
+                        + f"Content-Length: {len(xsrf_token)}\r\n".encode('utf-8')
+                        + b"Content-Type: text/plain\r\n\r\n"
+                        + xsrf_token.encode('utf-8')
+                    )
+                else:
+                    username = "GUEST"  # Default to GUEST
+
+                    chat_collection.insert_one({
+                        "message": message,
+                        "username": username
+                    })
+                    response = b"HTTP/1.1 200 OK\r\n\r\nMessage sent successfully."
+                    self.request.sendall(response)
 
 
 
@@ -235,7 +270,6 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 })
 
                 users_collection.update_one({"username": username}, {"$set": {"auto_token": auth_token}})
-
 
                 response = (
                     b"HTTP/1.1 303 See Other\r\n"
