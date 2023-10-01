@@ -7,6 +7,7 @@ import json
 import bcrypt
 import uuid
 import pymongo
+import secrets
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
@@ -98,32 +99,54 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                     + content
                 )
 
+
         elif request.path == "/chat-message" and request.method == "POST":
+            # Decode and parse the request body
             data = request.body.decode("utf-8")
             parsed_data = json.loads(data)
-            message = html.escape(parsed_data["message"])
+            message = html.escape(parsed_data.get("message", ""))
             
+            # Extract and hash the authentication token
             auth_token = request.cookies.get("auth_token")
-            username = 'Guest'
 
-            if auth_token:
-                token_entry = None
-                for entry in tokens_collection.find():  # ユーザー名でフィルタリングせずにすべてのトークンを検索
-                    if bcrypt.checkpw(auth_token.encode('utf-8'), entry["hashed_token"]):
-                        token_entry = entry
-                        print(token_entry)
-                        break
-                if token_entry:
-                    username = token_entry["username"]  # 認証されたユーザー名を取得
-                    print(username)
+            if not auth_token:
+                response = b"HTTP/1.1 400 Bad Request\r\n\r\nMissing auth token."
+                return response
+
+            user_data = None
+            for token_entry in tokens_collection.find():
+                if bcrypt.checkpw(auth_token.encode('utf-8'), token_entry["hashed_token"]):
+                    user_data = token_entry
+                    break
             
-            # メッセージをデータベースに保存
-            chat_collection.insert_one({
-                "message": message,
-                "username": username
-            })
+            if user_data:
+                if not user_data.get("xsrf_token"):
+                    xsrf_token = secrets.token_hex(16)
+                    tokens_collection.update_one({"hashed_token": user_data["hashed_token"]}, {"$set": {"xsrf_token": xsrf_token}})
+                    print("xsrf_token was generated")
+                else:
+                    xsrf_token = user_data["xsrf_token"]
+                    print('xsrf_token exists')
+                
+                username = user_data["username"]
+                
+                chat_collection.insert_one({
+                    "message": message,
+                    "username": username
+                })
+                
+                response = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    + f"Content-Length: {len(xsrf_token)}\r\n".encode('utf-8')
+                    + b"Content-Type: text/plain\r\n\r\n"
+                    + xsrf_token.encode('utf-8')
+                )
+            else:
+                print('chat-message error')
+                response = b"HTTP/1.1 401 Unauthorized\r\n\r\nInvalid or missing auth token."
 
-            response = b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\nMessage received"
+            return response
+
 
         elif request.path.startswith("/chat-message/") and request.method == "DELETE":
             message_id_str = request.path.split("/")[-1]
@@ -156,7 +179,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             else:
                 # Setting the soft delete flag
                 chat_collection.update_one({"_id": message_id}, {"$set": {"deleted": True}})
-                response = b"HTTP/1.1 200 OK\r\n\r\nMessage marked as deleted"
+                response = b"HTTP/1.1 200 OK\r\n\r\nMessage marked as deleted"          
             
 
 
@@ -214,6 +237,9 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                     "hashed_token": hashed_token
                 })
 
+                users_collection.update_one({"username": username}, {"$set": {"auto_token": auth_token}})
+
+
                 response = (
                     b"HTTP/1.1 303 See Other\r\n"
                     + f"Set-Cookie: auth_token={auth_token}; HttpOnly; Max-Age=3600\r\nLocation: /\r\n\r\n".encode('utf-8'))
@@ -221,19 +247,6 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
             else:
                 response = b"HTTP/1.1 401 Unauthorized\r\n\r\nInvalid credentials."
-
-        # elif request.path == '/delete' and request.method == 'POST':
-        #     data = request.body.decode("utf-8")
-        #     parsed_data = dict(item.split("=") for item in data.split("&"))
-
-        #     message_id = html.escape(parsed_data["messageId"])
-        #     auth_token = request.cookies.get("auth_token")
-        #     username = users_collection.find_one({
-                
-        #     })
-
-
-
 
         elif request.path == "/visit-counter":
             cookie = request.get_cookie("visit_count")
