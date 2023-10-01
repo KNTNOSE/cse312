@@ -44,12 +44,15 @@ function sendChat() {
     const message = chatTextBox.value;
     chatTextBox.value = "";
     const request = new XMLHttpRequest();
+
     request.onreadystatechange = function () {
         if (this.readyState === 4 && this.status === 200) {
             console.log(this.response);
         }
     }
-    const messageJSON = {"message": message};
+    const xsrfToken = document.getElementById("xsrf-token-input").value;
+    const messageJSON = {"message": message, "xsrf_token": xsrfToken};
+    // const messageJSON = {"message": message};
     request.open("POST", "/chat-message");
     request.send(JSON.stringify(messageJSON));
     chatTextBox.focus();
@@ -70,6 +73,18 @@ function updateChat() {
     request.send();
 }
 
+function fetchXSRFToken() {
+    const request = new XMLHttpRequest();
+    request.onreadystatechange = function () {
+        if (this.readyState === 4 && this.status === 200) {
+            const xsrfToken = this.responseText;
+            document.getElementById("xsrf-token-input").value = xsrfToken;
+        }
+    }
+    request.open("GET", "/get-xsrf-token");
+    request.send();
+}
+
 function welcome() {
     document.addEventListener("keypress", function (event) {
         if (event.code === "Enter") {
@@ -82,4 +97,5 @@ function welcome() {
 
     updateChat();
     setInterval(updateChat, 2000);
+    fetchXSRFToken();
 }
