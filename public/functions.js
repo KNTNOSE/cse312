@@ -73,17 +73,7 @@ function updateChat() {
     request.send();
 }
 
-function fetchXSRFToken() {
-    const request = new XMLHttpRequest();
-    request.onreadystatechange = function () {
-        if (this.readyState === 4 && this.status === 200) {
-            const xsrfToken = this.responseText;
-            document.getElementById("xsrf-token-input").value = xsrfToken;
-        }
-    }
-    request.open("GET", "/get-xsrf-token");
-    request.send();
-}
+
 
 function welcome() {
     document.addEventListener("keypress", function (event) {
@@ -97,5 +87,4 @@ function welcome() {
 
     updateChat();
     setInterval(updateChat, 2000);
-    fetchXSRFToken();
 }

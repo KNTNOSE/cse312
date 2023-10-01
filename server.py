@@ -111,7 +111,6 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
             if not auth_token:
                 response = b"HTTP/1.1 400 Bad Request\r\n\r\nMissing auth token."
-                return response
 
             user_data = None
             for token_entry in tokens_collection.find():
@@ -127,6 +126,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 else:
                     xsrf_token = user_data["xsrf_token"]
                     print('xsrf_token exists')
+                
                 
                 username = user_data["username"]
                 
@@ -145,17 +145,16 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 print('chat-message error')
                 response = b"HTTP/1.1 401 Unauthorized\r\n\r\nInvalid or missing auth token."
 
-            return response
 
 
         elif request.path.startswith("/chat-message/") and request.method == "DELETE":
             message_id_str = request.path.split("/")[-1]
             message_id = ObjectId(message_id_str)
-            print(message_id)
+            # print(message_id)
             
             # Authenticate the user using the auth_token
             auth_token = request.cookies.get("auth_token")
-            print(auth_token)
+            
 
             username = 'Guest'
             if auth_token:
@@ -163,14 +162,12 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 for token_entry in tokens_collection.find():
                     if bcrypt.checkpw(auth_token.encode('utf-8'), token_entry["hashed_token"]):
                         username = token_entry["username"]
-                        print(username)
                         break
 
                     else:
                         print('token_entry was not Found')
             
             message = chat_collection.find_one({"_id": message_id})
-            print(message)
 
             if not message:
                 response = b"HTTP/1.1 404 Not Found\r\n\r\nMessage not found"
